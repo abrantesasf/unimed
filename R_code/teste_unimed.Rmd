@@ -1,0 +1,249 @@
+---
+title: "Unimed Vitória<br />teste de proficiência em data science"
+author: "Abrantes Araújo Silva Filho"
+email: "abrantesasf@gmail.com"
+date: "2017-10-28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      warning = FALSE,
+                      error = TRUE,
+                      message = FALSE)
+```
+
+## Introdução
+
+Este documento apresenta minha análise de um estudo de caso preparado pela Unimed Vitória, como teste de proficiência em Data Science.
+
+Como o limite de tempo para a realização deste estudo de caso foi de 6 horas, optei por realizar e apresentar todas as etapas da análise do começo ao fim sem, no entanto, testar diversos modelos e/ou variações nos parâmetros e ajustes possíveis nos diversos algoritmos.
+
+Meu objetivo neste estudo de caso foi apresentar todas as etapas do *__processo de análise__*, sem um detalhamento extremo de cada fase (o que levaria dias de análise): por exemplo, técnicas de *emsemble* não foram utilizadas.
+
+Os arquivos necessários para a reprodução deste estudo de caso estão em meu repositório no GitHub: [github.com/abrantesasf/unimed](https://github.com/abrantesasf/unimed).
+
+## Problema proposto: *visão do negócio*
+Uma corretora de valores que orienta seus clientes a investirem em opções no mercado financeiro, gostaria de agrupar esses clientes em grupos bem definidos de acordo com características em comum.
+
+Com esse intuito a corretora forneceu um arquivo de planilha eletrônica em formato Microsoft Excel contento informações sobre diversas características desses clientes.
+
+O trabalho deste estudo de caso consiste em analisar esses dados e encontrar esses grupos de clientes baseados.
+
+## Problema proposto: *visão da análise*
+Esse é um problema clássico já bem estudado na literature de *data mining* e *machine learning*, classificando-se na categoria de *unsupervised learning* na qual temos um conjunto de dados sem uma variável resposta (chamada de *label*) e queremos compreender a relação entre as diversas características dos objetos em estudo e identificar padrões.
+
+Diversas técnicas de *unsupervised learning* existem, como por exemplo:
+
+* Clustering
+* Association Rule Mining
+* Affinity Analysis
+* Dimensionality Reduction
+
+Para o problema proposto o mais indicado é utilizar algum algoritmo de *clustering*, já que o objetivo do *clustering* é particionar um conjunto de dados em grupos que sejam os mais similares possíveis (o ideal é que existe alta similaridade intra-grupo e alta dissimilaridade inter-grupos).
+
+Como a análise de clustering é um processo altamente iterativo (envolvendo a modelagem, julgamento do modelo, ajustes do modelo e novo julgamento) até que o resultado seja considerado satisfatório, o limite de tempo imposto pelo estudo de caso limitará também a quantidade e a profundidade das análises realizadas.
+
+## Ambiente de análise
+O estudo de caso exigia a utilização do R, apesar de outros softwares também proporcionarem ferramentas de *clustering* (como Matlab, Python com scikit-learn, Weka e outros).
+
+Meu ambiente de trabalho é um notebook Linux (Fedora 26, 64 bits, com 6 GB RAM), com a seguinte versão do R instalada:
+
+```{r}
+version
+```
+
+Toda análise foi realizada com a IDE [RStudio](https://www.rstudio.com/) e todos os códigos foram escritos em [R Markdown](http://rmarkdown.rstudio.com/) para reprodutibilidade.
+
+### Diretório de trabalho
+Definição do diretório de trabalho:
+
+```{r}
+setwd("~/repositoriosGit/unimed/R_code")
+```
+
+### Carga de packages
+Os seguintes packages foram carregados e utilizaos:
+
+```{r}
+library("ggplot2")
+library("xlsx")
+```
+
+## Leitura e carga dos dados
+Os dados foram fornecidos em um arquivo Micrisoft Excel com duas planilhas: "Dados" e "DEPARA". Somente a planilha "Dados" nos interessa:
+
+```{r}
+# Lê os dados para o data frame df, já convertendo as strings como factors (nem sempre isso
+# será a melhor opção, mas para uma análise inicial e rápida pode ser feito):
+df <- read.xlsx("../data/DataSet.xlsx", sheetName = "Dados")
+
+```
+
+## Conhecendo o dataset, limpeza e organização
+```{r}
+# Verifica estrutura do df:
+str(df)
+```
+
+Temos um dataset com 4.972 observações e 11 variáveis, sendo a primeira a ID de cada cliente. As variáveis string já foram convertidas como factors, a data de nascimento é da classe POSIXct e as demais variáveis são numéricas (em escalas diferentes).
+
+Um breve sumário das variáveis é dado por:
+```{r}
+summary(df)
+```
+
+Pelo sumário podemos ver que **não existem dados NA**, significando que podemos trabalhar com todas as observações. Entretanto, as variáveis VALOR parecem estranhas: a mediana e o terceiro quartil são muito mais baixas do que o valor máximo, indicando prováveis outliers extremos. Para verificar melhor a distribuição dessas variáveis:
+
+```{r}
+# Variável para armazenar o parâmetro mfrow atual:
+numGraf <- par()$mfrow
+
+# 4 gráficos de uma vez
+par(mfrow = c(2,2))
+
+# Histograma das variáveis VALOR
+hist(df$VALOR_01)
+hist(df$VALOR_02)
+hist(df$VALOR_03)
+hist(df$VALOR_04)
+
+# Retorna padrão gráfico
+par(mfrow = numGraf)
+```
+
+Os histogramas mostraram uma compressão grande no início da escala, não servindo nem para ter uma idéia da distribuição dessas variáveis. Provavelmente os outliers extremos são a causa disso. para ter uma idéia da distribuição, já que os histogramas foram inúteis nesse caso, podemos verificar os quantis:
+
+```{r}
+# Obtendo os quantis detalhados
+quantile(df$VALOR_01, seq(0, 1, 0.05))
+quantile(df$VALOR_02, seq(0, 1, 0.05))
+quantile(df$VALOR_03, seq(0, 1, 0.05))
+quantile(df$VALOR_04, seq(0, 1, 0.05))
+
+# Contando os possíveis outliers extremos (quantidade maior que P95 e P97):
+v1 <- c(sum(df$VALOR_01 > quantile(df$VALOR_01, 0.95)), sum(df$VALOR_01 > quantile(df$VALOR_01, 0.97)))
+v2 <- c(sum(df$VALOR_02 > quantile(df$VALOR_01, 0.95)), sum(df$VALOR_02 > quantile(df$VALOR_02, 0.97)))
+v3 <- c(sum(df$VALOR_03 > quantile(df$VALOR_01, 0.95)), sum(df$VALOR_03 > quantile(df$VALOR_03, 0.97)))
+v4 <- c(sum(df$VALOR_04 > quantile(df$VALOR_01, 0.95)), sum(df$VALOR_04 > quantile(df$VALOR_04, 0.97)))
+# Gera matriz:
+posOut <- matrix(c(v1, v2, v3, v4), nrow = 4, ncol = 2, byrow = TRUE)
+# Nomes das linhas e colunas da matriz
+rownames(posOut) <- c("VALOR_O1", "VALOR_O2", "VALOR_O3", "VALOR_O4")
+colnames(posOut) <- c(">P95", ">P97")
+posOut
+```
+
+Como podemos ver algumas poucas observações podem ser outliers extremos e estão causando uma influência enorme da distribuição das variáveis VALOR. Entretanto, devido ao limite de tempo deste estudo de caso, não faremos um estudo mais detalhado desses outliers e os materemos na análise, assumindo os riscos de que o modelo de clusterização possa ser influenciado de algum modo por esses outliers.
+
+Além dos outliers as variáveis numéricas estão em escalas muito diferentes e precisam ser padronizadas. Como agora começaremos, de fato, a alterar o dataset, também ajustaremos o seed para a reprodutibilidade da análise:
+
+```{r}
+# Ajusta seed para reprodutibilidade
+set.seed(999)
+
+# Padroniza variáveis numéricas, criando uma outra variável com a letra "p" no final
+df$GEO_REFERENCIAp <- scale(df$GEO_REFERENCIA)
+df$VALOR_01p <- scale(df$VALOR_01)
+df$VALOR_02p <- scale(df$VALOR_02)
+df$VALOR_03p <- scale(df$VALOR_03)
+df$VALOR_04p <- scale(df$VALOR_04)
+```
+
+Outras análises introdutórias ou técnicas de redução da dimensionalidade e/ou de seleção das variáveis (*feature selection*) poderiam ser realizadas, mas o dataset já está em condições de uma primeira clusterização exploratória.
+
+## Clusterização
+A clusterização não é um método ou algoritmo em si mesma: ela é o processo de separar grupos similares de um conjunto de dados, e pode ser realizada por diferentes métodos e algoritmos:
+
+* Métodos baseados em __modelos probabilísticos__ (por exemplo: *mixture models --- Gaussian, Bernoulli, Hidden Markov ---* e algoritmos *Expectation Maximization --- EM*)
+* Métodos __hierárquicos__ (por exemplo: *Agglomerative Clustering*, *Divisive Clustering*)
+* Métodos baseados em __particionamento__ (por exemplo: *K-Means*, *K-Medoids*, *Fuzzy K-Means*)
+* Métodos baseados em __densidade__ (por exemplo: *DBSCAN*, *DENCLUE*)
+* Métodos baseadas em __grid__ (por exemplo: *GRIDCLUS*, *BANG*, *AMR*)
+* Métodos baseados em __fatorizações de matrizes___ (por exemplo: *NMF: nonnegative matrix factorizations*)
+* Métodos __espectrais__ (por exemplo: *unnormalized spectral clustering*)
+
+A quantidade de métodos e algoritmos para clusterização é muito maior do que a apresentada na lista acima e, além disso, ainda existem variações dependendo se os dados são de alta dimensionalidade, se são uma *stream* de big data, se são categóricos, se são texto, se são multimídia (áudio, imagens, vídeos), séries temporais, se biológicos, se são dados em rede e muitos outros. Também podem ser utilizadas técnicas de *ensembles*, que são o agrupamento de dois ou mais métodos de clusterização para melhorar os resultados.
+
+O assunto é extenso e para uma análise profunda e detalhada recomendo o livro [*Data Clustering: Algorithms and Applications*](https://www.amazon.com/gp/product/1466558210/ref=as_li_tl?ie=UTF8&camp=1789&creative=9325&creativeASIN=1466558210&linkCode=as2&tag=abrantesasf02-20&linkId=e4ab39d3228046864664b0898d8c164c), editado por *Charu C. Aggarwal* e *Chandan K. Reddy*.
+
+Em nossa clusterização exploratória, utilizaremos um método de particionamento baseado no algoritmo *K-Means* que, apesar de ser um dos métodos de clusterização mais simples, é bem eficiente e pode servir como base e referẽncia para clusterizações com métodos mais complexos.
+
+Vamos fazer mais algumas operações de ajuste no dataset para que o K-Means possa ser executado:
+
+```{r}
+# Criando outro dataset para análise
+df2 <- df[, c("GEO_REFERENCIAp",
+              "DATA_NASCIMENTO",
+              "PROFISSAO",
+              "GENERO",
+              "ESTADO_CIVIL",
+              "VALOR_01p",
+              "VALOR_02p",
+              "VALOR_03p",
+              "VALOR_04p",
+              "PERFIL"
+              )]
+
+# Transformando os fatores em números
+df2$PERFIL <- scale(as.numeric(df2$PERFIL))
+df2$PROFISSAO <- scale(as.numeric(df2$PROFISSAO))
+df2$GENERO <- scale(as.numeric(df2$GENERO))
+df2$ESTADO_CIVIL <- scale(as.numeric(df2$ESTADO_CIVIL))
+
+# Função para o cálculo da idade:
+age <- function(from, to) {
+    from_lt = as.POSIXlt(from)
+    to_lt = as.POSIXlt(to)
+
+    age = to_lt$year - from_lt$year
+
+    ifelse(to_lt$mon < from_lt$mon |
+               (to_lt$mon == from_lt$mon & to_lt$mday < from_lt$mday),
+           age - 1, age)
+}
+
+# Altera a data de nascimento para ano
+df2$DATA_NASCIMENTO <- age(df2$DATA_NASCIMENTO, Sys.time())
+df2$DATA_NASCIMENTO <- scale(df2$DATA_NASCIMENTO)
+```
+
+Como clusterização exploratória, faremos uma análise de componentes principais e utilizaremos os 2 primeiros componentes como as variáveis para o K-Means (isso facilita a visualização dessa clusterização inicial).
+
+Usaremos como número inicial de clusters, k = 6:
+
+```{r}
+# Faz a PCA:
+pca <- princomp(df2, cor = T)
+
+# Obtém componentes
+pc.c <- pca$scores
+pc.c1 <- -1*pc.c[,1]
+pc.c2 <- -1*pc.c[,2]
+
+# Dados para o K-means
+df3 <- cbind(pc.c1, pc.c2)
+
+# Número de clusters
+k = 6
+
+# Executa K-means
+cl <- kmeans(df3, k)
+
+# Plota resultados
+plot(pc.c1, pc.c2,col=cl$cluster)
+points(cl$centers, pch=7)
+```
+
+Essa clusterização exploratória, com 6 clusters, mostrou que 5 deles estão praticamente juntos e 1 cluster está bem separado dos demais. É de se investigar se o agrupamento dos 5 clusters não está sendo causado por algum outro fator, como os outliers.
+
+## Abordagens posteriores
+Fizemos uma clusterização exploratória onde encontramos como resultado um "conglomerado" de clusters bem próximos, separados de um único cluster. Esse resultado inicial é importante para levantar mais questionamentos, mas precisa ser muito apurado ainda.
+
+Primeiro teremos que avaliar se os outliers estão causando alguma influência na clusterização e, se essa influência for capaz de mudar consideravelmente o resultado, teremos que decidir entre manter ou remover ou outliers.
+
+Depois temos que decidir qual o número ideal de cluster. Não existe nenhum regra padrão para isso, embora técnicas como o "elbow plot" possam dar alguns insights. Outras técnicas como por exemplo a *Bayesian Information Criterion (BIC)* ou a *Akaike Information Criterion (AIC)* também podem ser utilizadas para definir o número de clusters.
+
+Outras transformações dos dados: ainda para melhorar a clusterização, podemos tentar transformar os dados utilizando escalas logarítmicas ou padronizando-os através de escores-z.
+
+Técnicas mais avançadas de *ensembles* também pode ser utilizadas para tentar melhorar a clusterização.
